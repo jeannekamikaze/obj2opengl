@@ -90,7 +90,27 @@ output filename without path and extension.
 =item B<-noverbose>
 
 Runs this script silently.
-   
+
+=item B<-bin>
+
+Output in binary format.
+
+=item B<-indexed>
+
+Output indexed triangles.
+
+=item B<-interleaved>
+
+Output interleaved vertex attributes.
+
+=item B<-matopt>
+
+Optimise material output by encoding materials as vertex attributes.
+
+=item B<-unit>
+
+Rescale the model to fit it in the unit cube.
+
 =cut
 
 use Getopt::Long;
@@ -130,6 +150,10 @@ sub handleArguments() {
 	my $man = 0;
 	my $noscale = 0;
 	my $nomove = 0;
+	$outputBinary = 0;
+	$indexed = 0;
+	$interleaved = 0;
+	$matopt = 0;
 	$verbose = 1;
 	$errorInOptions = !GetOptions (
 		"help" => \$help,
@@ -141,6 +165,10 @@ sub handleArguments() {
 		"outputFilename=s" => \$outFilename,
 		"nameOfObject=s" => \$object,
 		"verbose!" => \$verbose,
+		"bin" => \$outputBinary,
+		"indexed" => \$indexed,
+		"interleaved" => \$interleaved,
+		"matopt" => \$matopt
 		);
 	
 	if($noscale) {
@@ -167,7 +195,13 @@ sub handleArguments() {
 	# (optional) derive output filename from input filename
 	unless($errorInOptions || defined($outFilename)) {
 		my ($file, $dir, $ext) = fileparse($inFilename, qr/\.[^.]*/);
-		$outFilename = $dir . $file . ".h";
+		$outFilename = $dir . $file;
+		if ($outputBinary) {
+			$outFilename = $outFilename . ".bin";
+		}
+		else {
+			$outFilename = $outFilename . ".txt";
+		}
 	}
 	
 	# (optional) define object name from output filename
@@ -304,11 +338,26 @@ sub printInputAndOptions() {
 }
 
 sub printStatistics() {
+	my $numVerts = 3*$numFaces;
+	my $ratio = $indexMapSize/$numVerts*100;
 	print "----------------\n";
 	print "Vertices       : $numVerts\n";
 	print "Faces          : $numFaces\n";
 	print "Texture Coords : $numTexture\n";
 	print "Normals        : $numNormals\n";
+	if ($indexed)
+	{
+		my $numIndices = scalar @indices;
+		print "----------------\n";
+		print "Indices                       : $numIndices\n";
+		print "Output vertices (non indexed) : $numVerts\n";
+		print "Output vertices (indexed)     : $indexMapSize\n";
+		printf ("Size                          : %4.2f%\n", $ratio);
+	}
+	else
+	{
+		print "Vertices      : $numVerts\n";
+	}
 }
 
 # reads vertices into $xcoords[], $ycoords[], $zcoords[]
@@ -329,6 +378,10 @@ sub loadData {
 	$numFaces = 0;
 	$numTexture = 0;
 	$numNormals = 0;
+	$numObjects = 0;
+	$indexMapSize = 0;
+	@indices = ();
+	%vertexToIdx = ();
 	
 	open ( INFILE, "<$inFilename" )
 	  || die "Can't find file $inFilename...exiting \n";
@@ -343,7 +396,7 @@ sub loadData {
 	    @tokens= split(' ', $line);
 	    $x = ( $tokens[1] - $xcen ) * $scalefac;
 	    $y = ( $tokens[2] - $ycen ) * $scalefac;
-	    $z = ( $tokens[3] - $zcen ) * $scalefac;    
+	    $z = ( $tokens[3] - $zcen ) * $scalefac;
 	    $xcoords[$numVerts] = $x; 
 	    $ycoords[$numVerts] = $y;
 	    $zcoords[$numVerts] = $z;
@@ -352,7 +405,7 @@ sub loadData {
 	  }
 	  
 	  # texture coords
-	  if ($line =~ /vt\s+.*/)
+	  elsif ($line =~ /vt\s+.*/)
 	  {
 	    @tokens= split(' ', $line);
 	    $x = $tokens[1];
@@ -364,7 +417,7 @@ sub loadData {
 	  }
 	  
 	  #normals
-	  if ($line =~ /vn\s+.*/)
+	  elsif ($line =~ /vn\s+.*/)
 	  {
 	    @tokens= split(' ', $line);
 	    $x = $tokens[1];
@@ -378,7 +431,7 @@ sub loadData {
 	  }
 	  
 	  # faces
-	  if ($line =~ /f\s+([^ ]+)\s+([^ ]+)\s+([^ ]+)(\s+([^ ]+))?/) 
+	  elsif ($line =~ /f\s+([^ ]+)\s+([^ ]+)\s+([^ ]+)(\s+([^ ]+))?/) 
 	  {
 	  	@a = split('/', $1);
 	  	@b = split('/', $2);
@@ -407,23 +460,90 @@ sub loadData {
 			$ta_idx[$numFaces] = $a[1]-1;
 			$na_idx[$numFaces] = $a[2]-1;
 
-			$vb_idx[$numFaces] = $d[0]-1;
-			$tb_idx[$numFaces] = $d[1]-1;
-			$nb_idx[$numFaces] = $d[2]-1;
+			$vb_idx[$numFaces] = $c[0]-1;
+			$tb_idx[$numFaces] = $c[1]-1;
+			$nb_idx[$numFaces] = $c[2]-1;
 
-			$vc_idx[$numFaces] = $c[0]-1;
-			$tc_idx[$numFaces] = $c[1]-1;
-			$nc_idx[$numFaces] = $c[2]-1;
+			$vc_idx[$numFaces] = $d[0]-1;
+			$tc_idx[$numFaces] = $d[1]-1;
+			$nc_idx[$numFaces] = $d[2]-1;
 
 			$face_line[$numFaces] = $line;
 
 			$numFaces++;
 		}
 		
-	  }  
+		if ($indexed)
+		{
+			# Update vertex -> index map
+			my $n = scalar keys %vertexToIdx;
+			my $matIdx = $matIndexFromName{$material};
+			my $vert1  = "$a[0]/$a[1]/$a[2]/$matIdx";
+			my $vert2  = "$b[0]/$b[1]/$b[2]/$matIdx";
+			my $vert3  = "$c[0]/$c[1]/$c[2]/$matIdx";
+			my $vert4  = "";
+			if ($5 ne "") { $vert4 = "$d[0]/$d[1]/$d[2]/$matIdx"; }
+			if (not exists $vertexToIdx{$vert1}) { $vertexToIdx{$vert1} = $n++; }
+			if (not exists $vertexToIdx{$vert2}) { $vertexToIdx{$vert2} = $n++; }
+			if (not exists $vertexToIdx{$vert3}) { $vertexToIdx{$vert3} = $n++; }
+			if ($5 ne "" and not exists $vertexToIdx{$vert4}) { $vertexToIdx{$vert4} = $n++; }
+			
+			# Push indices
+			my $n = scalar @indices;
+			$indices[$n++] = $vertexToIdx{$vert1};
+			$indices[$n++] = $vertexToIdx{$vert2};
+			$indices[$n++] = $vertexToIdx{$vert3};
+			if ($5 ne "")
+			{
+				$indices[$n++] = $vertexToIdx{$vert1};
+				$indices[$n++] = $vertexToIdx{$vert3};
+				$indices[$n++] = $vertexToIdx{$vert4};
+			}
+		}
+	  }
+	  
+	  # groups
+	  elsif ($line =~ /usemtl\s*/)
+	  {
+	  	@tokens = split(' ', $line);
+	  	$material = $tokens[1];
+	  	if ($indexed)
+	  	{
+	  		my $n = scalar @indices;
+	  		$objects[$numObjects] = [$material, scalar @indices];
+	  	}
+	  	else
+	  	{
+	  		$objects[$numObjects] = [$material, $numFaces];
+	  	}
+	  	$numObjects++;
+	  }
+	  
+	  # material file
+	  elsif ($line =~ /mtllib/)
+	  {
+	  	@tokens = split (' ', $line);
+	  	$mtl = $tokens[1];
+	  	loadMTL ($mtl);
+	  	
+	  	#print "Materials:\n";
+	  	#for my $mat (@materials) {
+	  	#	print "Material ".$mat->{"name"}."\n";
+	  	#	print "Ka: ".$mat->{"Ka"}[0].", ".$mat->{"Ka"}[1].", ".$mat->{"Ka"}[2]."\n";
+	  	#	print "Kd: ".$mat->{"Kd"}[0].", ".$mat->{"Kd"}[1].", ".$mat->{"Kd"}[2]."\n";
+	  	#	print "Ks: ".$mat->{"Ks"}[0].", ".$mat->{"Ks"}[1].", ".$mat->{"Ks"}[2]."\n";
+	  	#	print "Ns: ".$mat->{"Ns"}."\n";
+	  	#}
+	  }
 	}
 	
 	close INFILE;
+	
+	$indexMapSize = scalar keys %vertexToIdx;
+	
+	#print "Vertex -> Index:\n";
+	#while (($key,$val) = each(%vertexToIdx)) { print "$key -> $val\n"; }
+	#print "Indices:\n@indices\n";
 }
 
 sub normalizeNormals {
@@ -458,83 +578,405 @@ sub fixedIndex {
     }
 }
 
-sub writeOutput {
-	open ( OUTFILE, ">$outFilename" ) 
-	  || die "Can't create file $outFilename ... exiting\n";
+sub loadMTL {
+	my $i = -1;
 	
-	print OUTFILE "/*\n";
-	print OUTFILE "created with obj2opengl.pl\n\n";
-
-	# some statistics
-	print OUTFILE "source file    : $inFilename\n";
-	print OUTFILE "vertices       : $numVerts\n";
-	print OUTFILE "faces          : $numFaces\n";
-	print OUTFILE "normals        : $numNormals\n";
-	print OUTFILE "texture coords : $numTexture\n";
-	print OUTFILE "\n\n";
+	my $mtl = $_[0];
 	
-	# example usage
-	print OUTFILE "// include generated arrays\n";
-	print OUTFILE "#import \"".$outFilename."\"\n";
-	print OUTFILE "\n";
-	print OUTFILE "// set input data to arrays\n";
-	print OUTFILE "glVertexPointer(3, GL_FLOAT, 0, ".$object."Verts);\n";
-	print OUTFILE "glNormalPointer(GL_FLOAT, 0, ".$object."Normals);\n"
-		if $numNormals > 0;
-	print OUTFILE "glTexCoordPointer(2, GL_FLOAT, 0, ".$object."TexCoords);\n"
-		if $numTexture > 0;
-	print OUTFILE "\n";
-	print OUTFILE "// draw data\n";
-	print OUTFILE "glDrawArrays(GL_TRIANGLES, 0, ".$object."NumVerts);\n";
-	print OUTFILE "*/\n\n";
+	print "Loading material file $mtl\n";
 	
-	# needed constant for glDrawArrays
-	print OUTFILE "unsigned int ".$object."NumVerts = ".($numFaces * 3).";\n\n";
+	open (MTL, "<$mtl")
+		|| die "Can't open file $mtl ... exiting\n";
 	
-	# write verts
-	print OUTFILE "float ".$object."Verts \[\] = {\n"; 
-	for( $j = 0; $j < $numFaces; $j++)
+	while (my $line = <MTL>) 
 	{
-		$ia = fixedIndex($va_idx[$j], $numVerts);
-		$ib = fixedIndex($vb_idx[$j], $numVerts);
-		$ic = fixedIndex($vc_idx[$j], $numVerts);
-		print OUTFILE "  // $face_line[$j]\n";
-		print OUTFILE "  $xcoords[$ia], $ycoords[$ia], $zcoords[$ia],\n";
-		print OUTFILE "  $xcoords[$ib], $ycoords[$ib], $zcoords[$ib],\n";
-		print OUTFILE "  $xcoords[$ic], $ycoords[$ic], $zcoords[$ic],\n";
+		chop $line;
+		
+		if ($line =~ /newmtl/)
+		{
+			@tokens = split (' ', $line);
+			$mat = $tokens[1];
+			$i++;
+			$materials[$i]{"name"} = $mat;
+		}
+		elsif ($line =~ /Ns/)
+		{
+			@tokens = split (' ', $line);
+			my $Ns = $tokens[1];
+			$materials[$i]{"Ns"} = $Ns;
+		}
+		elsif ($line =~ /Ka/)
+		{
+			@tokens = split (' ', $line);
+			my @Ka = ($tokens[1], $tokens[2], $tokens[3]);
+			$materials[$i]{"Ka"} = \@Ka;
+		}
+		elsif ($line =~ /Kd/)
+		{
+			@tokens = split (' ', $line);
+			my @Kd = ($tokens[1], $tokens[2], $tokens[3]);
+			$materials[$i]{"Kd"} = \@Kd;
+		}
+		elsif ($line =~ /Ks/)
+		{
+			@tokens = split (' ', $line);
+			my @Ks = ($tokens[1], $tokens[2], $tokens[3]);
+			$materials[$i]{"Ks"} = \@Ks;
+		}
 	}
-	print OUTFILE "};\n\n";
 	
-	# write normals
-	if($numNormals > 0) {
-		print OUTFILE "float ".$object."Normals \[\] = {\n"; 
-		for( $j = 0; $j < $numFaces; $j++) {
-			$ia = fixedIndex($na_idx[$j], $numNormals);
-			$ib = fixedIndex($nb_idx[$j], $numNormals);
-			$ic = fixedIndex($nc_idx[$j], $numNormals);
-			print OUTFILE "  // $face_line[$j]\n";
-			print OUTFILE "  $nx[$ia], $ny[$ia], $nz[$ia],\n";
-			print OUTFILE "  $nx[$ib], $ny[$ib], $nz[$ib],\n";
-			print OUTFILE "  $nx[$ic], $ny[$ic], $nz[$ic],\n";
+	close MTL;
+	
+	# Build mat index from name
+	for (my $j = 0; $j < scalar @materials; $j++)
+	{
+		my $name = $materials[$j]{"name"};
+		$matIndexFromName{$name} = $j;
+	}
+}
+
+sub writeOutput {
+	my $numMaterials = @materials;
+	$matopt = $matopt && $numMaterials && $numObjects;
+	my $writeMaterials = $numMaterials && !$matopt;
+	my $writeObjects = $numObjects && !$matopt;
+	
+	open ( OUTFILE, ">:raw", $outFilename ) 
+	  || die "Can't create file $outFilename ... exiting\n";
+	  
+	# write header
+	print OUTFILE "verts";
+	if ($numNormals)     { print OUTFILE " normals"; }
+	if ($numTexture)     { print OUTFILE " texcoords"; }
+	if ($outputBinary)   { print OUTFILE " binary"; }
+	if ($indexed)        { print OUTFILE " indexed"; }
+	if ($interleaved)    { print OUTFILE " interleaved"; }
+	if ($writeMaterials) { print OUTFILE " materials"; }
+	if ($writeObjects)   { print OUTFILE " objects"; }
+	if ($matopt)         { print OUTFILE " matopt"; }
+	print OUTFILE "\n";
+	if ($indexed)
+	{
+		print OUTFILE "$indexMapSize\n";
+		print OUTFILE scalar @indices."\n";
+	}
+	else
+	{
+		my $numVerts = 3*$numFaces;
+		print OUTFILE "$numVerts\n"; # needed constant for glDrawArrays
+	}
+	
+	# materials
+	if ($writeMaterials) {
+		print OUTFILE "mats $numMaterials\n";
+		for ($j = 0; $j < @materials; $j++) {
+			my $name = $materials[$j]{"name"};
+			my $Ns   = $materials[$j]{"Ns"};
+			my $Ka   = $materials[$j]{"Ka"};
+			my $Kd   = $materials[$j]{"Kd"};
+			my $Ks   = $materials[$j]{"Ks"};
+			print OUTFILE "mat $name $Ns $Ka[0] $Ka[1] $Ka[2] $Kd[0] $Kd[1] $Kd[2] $Ks[0] $Ks[1] $Ks[2]\n";
+		}
+	}
+	
+	# compute object instances
+	# objects are first sorted by material
+	# vertex arrays or indices arrays are then reordered according to new object order
+	# objects' offsets are then fixed
+	# finally, objects sharing the same material are compressed into a single object
+	if (!$matopt && $numObjects)
+	{
+		my $vertSize = 3;
+		if ($numNormals) { $vertSize += 3; }
+		if ($numTexture) { $vertSize += 2; }
+		if ($matopt)     { $vertSize += 5; }
+		for ($j = 0; $j < $numObjects; $j++)
+		{
+			my $matIndex = $matIndexFromName{$objects[$j][0]};
+			if ($indexed)
+			{
+				$start = $objects[$j][1];
+				if ($j < $numObjects-1) { $length = $objects[$j+1][1] - $start; }
+				else { $length = scalar @indices - $start; }
+			}
+			else
+			{
+				if ($j < $numObjects-1) { $length = $objects[$j+1][1] - $objects[$j][1]; }
+				else { $length = $numFaces - $objects[$j][1]; }
+				$length = 3*$length;
+				$start  = 3*$objects[$j][1];
+				if ($interleaved)
+				{
+					$start  *= $vertSize*4;
+					$length *= $vertSize*4;
+				}
+			}
+			@objects[$j] = [$j, $matIndex, $start, $length];
 		}
 		
-		print OUTFILE "};\n\n";
-	}
-	
-	# write texture coords
-	if($numTexture) {
-		print OUTFILE "float ".$object."TexCoords \[\] = {\n"; 
-		for( $j = 0; $j < $numFaces; $j++) {
-			$ia = fixedIndex($ta_idx[$j], $numTexture);
-			$ib = fixedIndex($tb_idx[$j], $numTexture);
-			$ic = fixedIndex($tc_idx[$j], $numTexture);
-			print OUTFILE "  // $face_line[$j]\n";
-			print OUTFILE "  $tx[$ia], $ty[$ia],\n";
-			print OUTFILE "  $tx[$ib], $ty[$ib],\n";
-			print OUTFILE "  $tx[$ic], $ty[$ic],\n";
+		# sort objects by material and group up
+		@objects = sort { $a->[1] cmp $b->[1] } @objects;
+		
+		# re-order vertex arrays or indices
+		if ($indexed)
+		{
+			my @indices_new = [];
+			my $x = 0;
+			for (my $j = 0; $j < scalar @objects; $j++)
+			{
+				my $start  = $objects[$j][2]; # Offset inside indices array
+				my $length = $objects[$j][3]; # Length
+				while ($length)
+				{
+					$indices_new[$x++] = $indices[$start++];
+					$length--;
+				}
+			}
+			@indices = @indices_new;
+		}
+		else
+		{
+			my @xcoords_new = [];
+			my @ycoords_new = [];
+			my @zcoords_new = [];
+			my @nx_new = [];
+			my @ny_new = [];
+			my @nz_new = [];
+			my @tx_new = [];
+			my @ty_new = [];
+			my $x = 0;
+			for (my $j = 0; $j < scalar @objects; $j++)
+			{
+				my $start  = $objects[$j][2]; # Offset inside indices array
+				my $length = $objects[$j][3]; # Length
+				while ($length)
+				{
+					$xcoords_new[$x] = $xcoords[$start];
+					$ycoords_new[$x] = $ycoords[$start];
+					$zcoords_new[$x] = $zcoords[$start];
+					$nx_new[$x] = $nx[$start];
+					$ny_new[$x] = $ny[$start];
+					$nz_new[$x] = $nz[$start];
+					$tx_new[$x] = $tx[$start];
+					$ty_new[$x] = $ty[$start];
+					$x++;
+					$start++;
+					$length--;
+				}
+			}
+			@xcoords = @xcoords_new;
+			@ycoords = @ycoords_new;
+			@zcoords = @zcoords_new;
+			@nx = @nx_new;
+			@nz = @nz_new;
+			@nz = @nz_new;
+			@tx = @tx_new;
+			@ty = @ty_new;
 		}
 		
-		print OUTFILE "};\n\n";
+		# recompute offsets
+		my $n = scalar @objects;
+		my $off = 0;
+		for (my $j = 0; $j < $n; $j++)
+		{
+			$objects[$j][2] = $off;
+			$off += $objects[$j][3];
+		}
+		
+		# compress objects sharing the same material
+		@objects_new = ();
+		my $n = scalar @objects;
+		my $mat = $objects[0][1];
+		my $old_mat = $mat;
+		my $start = 0;
+		my $length = 0;
+		for (my $j = 0; $j < $n; $j++)
+		{
+			#print "processing $objects[$j][0], $objects[$j][1], $objects[$j][2], $objects[$j][3]\n";
+			$mat = $objects[$j][1];
+			if ($mat != $old_mat)
+			{
+				#print "generating $old_mat, $start, $length\n";
+				@objects_new[scalar @objects_new] = [0, $old_mat, $start, $length];
+				$start += $length;
+				$length = $objects[$j][3];
+				$old_mat = $mat;
+			}
+			else
+			{
+				$length += $objects[$j][3];
+			}
+		}
+		if ($mat == $old_mat)
+		{
+			#print "generating $old_mat, $start, $length\n";
+			@objects_new[scalar @objects_new] = [0, $old_mat, $start, $length];
+		}
+		@objects = @objects_new;
+		$numObjects = scalar @objects;
+	}
+	
+	# object instances
+	if ($writeObjects)
+	{
+		print OUTFILE "objs $numObjects\n";
+		for (my $j = 0; $j < $numObjects; $j++)
+		{
+			print OUTFILE "obj $objects[$j][1] $objects[$j][2] $objects[$j][3]\n";
+		}
+	}
+	
+	# construct index to vertex map
+	my @idxToVertex = ();
+	if ($indexed)
+	{
+		while (my ($key,$val) = each(%vertexToIdx))
+		{
+			$idxToVertex[$val] = $key;
+		}
+		for (my $i = 0; $i < scalar @idxToVertex; $i++)
+		{
+			#print "$i -> $idxToVertex[$i]\n";
+		}
+		#print "vertexToIdx keys: ".(scalar keys   %vertexToIdx)."\n";
+		#print "vertexToIdx vals: ".(scalar values %vertexToIdx)."\n";
+		#print "idxToVertex: ".(scalar @idxToVertex)."\n";
+		#my $n = scalar keys %idxToVertex;
+		#print "n = $n, indexMapSize = $indexMapSize\n";
+		#print "Vertex -> Index:\n";
+		#for (my $j = 0; $j < $n; $j++) { print "$j -> ".$idxToVertex{$j}."\n"; }
+	}
+	
+	my $print = sub {
+		my ($file, @data) = @_;
+		if ($outputBinary)
+		{
+			my $n = scalar @data;
+			print $file pack("f".$n, @data);
+		}
+		else { print $file join(" ", @data)."\n"; }
+	};
+	
+	if ($interleaved)
+	{
+		if ($indexed)
+		{
+			for (my $j = 0; $j < $indexMapSize; $j++)
+			{
+				my $line = $idxToVertex[$j];
+				#print "$j: line = $line\n";
+				my @tokens = split ('/', $line);
+				my $vi = fixedIndex ($tokens[0]-1, $indexMapSize);
+				my $ni = -1;
+				my $ti = -1;
+				my $n = scalar @tokens;
+				if ($numNormals)
+				{
+					$ni = fixedIndex ($tokens[2]-1, $indexMapSize);
+				}
+				if ($numTexture)
+				{
+					$ti = fixedIndex ($tokens[1]-1, $indexMapSize);
+				}
+				my $Ka = $Ks = $Ns = 0;
+				if ($matopt)
+				{
+					my $matidx = $tokens[$n-1];
+					$mat = $materials[$tokens[$n-1]];
+					$Kd  = $mat->{"Kd"};
+					$Ks  = $mat->{"Ks"};
+					$Ns  = $mat->{"Ns"};
+				}
+				$print->(OUTFILE, $xcoords[$vi], $ycoords[$vi], $zcoords[$vi]); # verts
+				if ($ni >= 0) { $print->(OUTFILE, $nx[$ni], $ny[$ni], $nz[$ni]); } # normals
+				if ($ti >= 0) { $print->(OUTFILE, $tx[$ti], $ty[$ti]); } # tex coords
+				if ($matopt)  { $print->(OUTFILE, $Kd->[0], $Kd->[1], $Kd->[2], $Ks->[0], $Ns); } # mat attribs
+			}
+		}
+		else
+		{
+			for(my $j = 0; $j < $numFaces; $j++)
+			{
+				$via = fixedIndex($va_idx[$j], $numVerts);
+				$vib = fixedIndex($vb_idx[$j], $numVerts);
+				$vic = fixedIndex($vc_idx[$j], $numVerts);
+				if ($numNormals)
+				{
+					$nia = fixedIndex($na_idx[$j], $numNormals);
+					$nib = fixedIndex($nb_idx[$j], $numNormals);
+					$nic = fixedIndex($nc_idx[$j], $numNormals);
+				}
+				if ($numTexture)
+				{
+					$tia = fixedIndex($ta_idx[$j], $numTexture);
+					$tib = fixedIndex($tb_idx[$j], $numTexture);
+					$tic = fixedIndex($tc_idx[$j], $numTexture);
+				}
+				$print->(OUTFILE, $xcoords[$via], $ycoords[$via], $zcoords[$via]); # verts
+				if ($ni >= 0) { $print->(OUTFILE, $nx[$nia], $ny[$nia], $nz[$nia]); } # normals
+				if ($ti >= 0) { $print->(OUTFILE, $tx[$tia], $ty[$tia]); } # tex coords
+				$print->(OUTFILE, $xcoords[$vib], $ycoords[$vib], $zcoords[$vib]); # verts
+				if ($ni >= 0) { $print->(OUTFILE, $nx[$nib], $ny[$nib], $nz[$nib]); } # normals
+				if ($ti >= 0) { $print->(OUTFILE, $tx[$tib], $ty[$tib]); } # tex coords
+				$print->(OUTFILE, $xcoords[$vic], $ycoords[$vic], $zcoords[$vic]); # verts
+				if ($ni >= 0) { $print->(OUTFILE, $nx[$nic], $ny[$nic], $nz[$nic]); } # normals
+				if ($ti >= 0) { $print->(OUTFILE, $tx[$tic], $ty[$tic]); } # tex coords
+			}
+		}
+	}
+	else # not interleaved
+	{
+		if ($indexed)
+		{
+			for (my $j = 0; $j < $indexMapSize; $j++)
+			{
+				my $line = $idxToVertex[$j];
+				@tokens = split ('/', $line);
+				my $i = fixedIndex ($tokens[0]-1, $indexMapSize);
+				$print->(OUTFILE, $xcoords[$i], $ycoords[$i], $zcoords[$i]);
+				if ($numNormals) { $print->(OUTFILE, $nx[$i], $ny[$i], $nz[$i]); }
+				if ($numTexture) { $print->(OUTFILE, $tx[$i], $ty[$i]); }
+			}
+		}
+		else
+		{
+			for( $j = 0; $j < $numFaces; $j++)
+			{
+				$ia = fixedIndex($va_idx[$j], $numVerts);
+				$ib = fixedIndex($vb_idx[$j], $numVerts);
+				$ic = fixedIndex($vc_idx[$j], $numVerts);
+				#print OUTFILE "\t\t// $face_line[$j]\n";
+				$print->(OUTFILE, $xcoords[$ia], $ycoords[$ia], $zcoords[$ia]);
+				$print->(OUTFILE, $xcoords[$ib], $ycoords[$ib], $zcoords[$ib]);
+				$print->(OUTFILE, $xcoords[$ic], $ycoords[$ic], $zcoords[$ic]);
+				if ($numNormals) {
+					$ia = fixedIndex($na_idx[$j], $numNormals);
+					$ib = fixedIndex($nb_idx[$j], $numNormals);
+					$ic = fixedIndex($nc_idx[$j], $numNormals);
+					$print->(OUTFILE, $nx[$ia], $ny[$ia], $nz[$ia]);
+					$print->(OUTFILE, $nx[$ib], $ny[$ib], $nz[$ib]);
+					$print->(OUTFILE, $nx[$ic], $ny[$ic], $nz[$ic]);
+				}
+				if ($numTexture) {
+					$ia = fixedIndex($ta_idx[$j], $numTexture);
+					$ib = fixedIndex($tb_idx[$j], $numTexture);
+					$ic = fixedIndex($tc_idx[$j], $numTexture);
+					$print->(OUTFILE, $nx[$ia], $ny[$ia]);
+					$print->(OUTFILE, $nx[$ib], $ny[$ib]);
+					$print->(OUTFILE, $nx[$ic], $ny[$ic]);
+				}
+			}
+		}
+	}
+	
+	# write indices
+	if ($indexed)
+	{
+		for my $idx (@indices)
+		{
+			if ($outputBinary) { print OUTFILE pack("S<", $idx); }
+			else { print OUTFILE "$idx\n"; }
+		}
 	}
 	
 	close OUTFILE;
