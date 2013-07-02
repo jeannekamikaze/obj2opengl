@@ -107,10 +107,6 @@ Output interleaved vertex attributes.
 
 Optimise material output by encoding materials as vertex attributes.
 
-=item B<-unit>
-
-Rescale the model to fit it in the unit cube.
-
 =cut
 
 use Getopt::Long;
