@@ -62,10 +62,10 @@ Print a brief help message and exits.
 
 Prints the extended manual page and exits.
 
-=item B<-noScale>    
+=item B<-unit>    
 
-Prevents automatic scaling. Otherwise the object will be scaled
-such the the longest dimension is 1 unit.
+Fit the object in the unit cube, i.e. scale the object such the the
+longest dimension is 1 unit.
 
 =item B<-scale <float>>
 
@@ -109,8 +109,9 @@ Optimise material output by encoding materials as vertex attributes.
 
 =cut
 
-use Getopt::Long;
 use File::Basename;
+use Getopt::Long;
+use List::Util qw[min max];
 use Pod::Usage;
 
 # -----------------------------------------------------------------
@@ -144,8 +145,8 @@ writeOutput();
 sub handleArguments() {
 	my $help = 0;
 	my $man = 0;
-	my $noscale = 0;
 	my $nomove = 0;
+	$unit = 0;
 	$outputBinary = 0;
 	$indexed = 0;
 	$interleaved = 0;
@@ -154,7 +155,7 @@ sub handleArguments() {
 	$errorInOptions = !GetOptions (
 		"help" => \$help,
 		"man"  => \$man,
-		"noScale" => \$noscale,
+		"unit" => \$unit,
 		"scale=f" => \$scalefac,
 		"noMove" => \$nomove,
 		"center=f{3}" => \@center,
@@ -167,8 +168,9 @@ sub handleArguments() {
 		"matopt" => \$matopt
 		);
 	
-	if($noscale) {
+	if(!$unit) {
 		$scalefac = 1;
+		$aabb = { "min" => [], "max" => [] };
 	}
 	
 	if($nomove) {
@@ -396,8 +398,15 @@ sub loadData {
 	    $xcoords[$numVerts] = $x; 
 	    $ycoords[$numVerts] = $y;
 	    $zcoords[$numVerts] = $z;
-	
+	    
 	    $numVerts++;
+	    
+	    $aabb->{"min"}->[0] = min($aabb->{"min"}->[0], $x);
+	    $aabb->{"min"}->[1] = min($aabb->{"min"}->[1], $y);
+	    $aabb->{"min"}->[2] = min($aabb->{"min"}->[2], $z);
+		$aabb->{"max"}->[0] = max($aabb->{"max"}->[2], $z);
+		$aabb->{"max"}->[1] = max($aabb->{"max"}->[2], $z);
+		$aabb->{"max"}->[2] = max($aabb->{"max"}->[2], $z);
 	  }
 	  
 	  # texture coords
@@ -576,10 +585,10 @@ sub fixedIndex {
 
 sub loadMTL {
 	my $i = -1;
-	
 	my $mtl = $_[0];
+	$materials = ();
 	
-	print "Loading material file $mtl\n";
+	print "Materials      : $mtl\n";
 	
 	open (MTL, "<$mtl")
 		|| die "Can't open file $mtl ... exiting\n";
@@ -593,31 +602,28 @@ sub loadMTL {
 			@tokens = split (' ', $line);
 			$mat = $tokens[1];
 			$i++;
-			$materials[$i]{"name"} = $mat;
+			$materials[$i] = {"name" => $mat};
 		}
 		elsif ($line =~ /Ns/)
 		{
 			@tokens = split (' ', $line);
 			my $Ns = $tokens[1];
-			$materials[$i]{"Ns"} = $Ns;
+			$materials[$i]->{"Ns"} = $Ns;
 		}
 		elsif ($line =~ /Ka/)
 		{
 			@tokens = split (' ', $line);
-			my @Ka = ($tokens[1], $tokens[2], $tokens[3]);
-			$materials[$i]{"Ka"} = \@Ka;
+			$materials[$i]->{"Ka"} = [$tokens[1], $tokens[2], $tokens[3]];
 		}
 		elsif ($line =~ /Kd/)
 		{
 			@tokens = split (' ', $line);
-			my @Kd = ($tokens[1], $tokens[2], $tokens[3]);
-			$materials[$i]{"Kd"} = \@Kd;
+			$materials[$i]->{"Kd"} = [$tokens[1], $tokens[2], $tokens[3]];
 		}
 		elsif ($line =~ /Ks/)
 		{
 			@tokens = split (' ', $line);
-			my @Ks = ($tokens[1], $tokens[2], $tokens[3]);
-			$materials[$i]{"Ks"} = \@Ks;
+			$materials[$i]->{"Ks"} = [$tokens[1], $tokens[2], $tokens[3]];
 		}
 	}
 	
@@ -650,6 +656,7 @@ sub writeOutput {
 	if ($writeMaterials) { print OUTFILE " materials"; }
 	if ($writeObjects)   { print OUTFILE " objects"; }
 	if ($matopt)         { print OUTFILE " matopt"; }
+	if (!$unit)          { print OUTFILE " aabb"; }
 	print OUTFILE "\n";
 	if ($indexed)
 	{
@@ -661,17 +668,24 @@ sub writeOutput {
 		my $numVerts = 3*$numFaces;
 		print OUTFILE "$numVerts\n"; # needed constant for glDrawArrays
 	}
+	if (!$unit) {
+		print OUTFILE "aabb ".$aabb->{"min"}->[0]." ".$aabb->{"min"}->[1]." ".$aabb->{"min"}->[2]." "
+					         .$aabb->{"max"}->[0]." ".$aabb->{"max"}->[1]." ".$aabb->{"max"}->[2]."\n";
+	}
 	
 	# materials
 	if ($writeMaterials) {
 		print OUTFILE "mats $numMaterials\n";
 		for ($j = 0; $j < @materials; $j++) {
-			my $name = $materials[$j]{"name"};
-			my $Ns   = $materials[$j]{"Ns"};
-			my $Ka   = $materials[$j]{"Ka"};
-			my $Kd   = $materials[$j]{"Kd"};
-			my $Ks   = $materials[$j]{"Ks"};
-			print OUTFILE "mat $name $Ns $Ka[0] $Ka[1] $Ka[2] $Kd[0] $Kd[1] $Kd[2] $Ks[0] $Ks[1] $Ks[2]\n";
+			my $name = $materials[$j]->{"name"};
+			my $Ns   = $materials[$j]->{"Ns"};
+			my $Ka   = $materials[$j]->{"Ka"};
+			my $Kd   = $materials[$j]->{"Kd"};
+			my $Ks   = $materials[$j]->{"Ks"};
+			print OUTFILE "mat $name $Ns "
+			              ."$Ka->[0] $Ka->[1] $Ka->[2] "
+						  ."$Kd->[0] $Kd->[1] $Kd->[2] "
+						  ."$Ks->[0] $Ks->[1] $Ks->[2]\n";
 		}
 	}
 	
@@ -874,19 +888,18 @@ sub writeOutput {
 				{
 					$ti = fixedIndex ($tokens[1]-1, $indexMapSize);
 				}
-				my $Ka = $Ks = $Ns = 0;
-				if ($matopt)
-				{
-					my $matidx = $tokens[$n-1];
-					$mat = $materials[$tokens[$n-1]];
-					$Kd  = $mat->{"Kd"};
-					$Ks  = $mat->{"Ks"};
-					$Ns  = $mat->{"Ns"};
-				}
 				$print->(OUTFILE, $xcoords[$vi], $ycoords[$vi], $zcoords[$vi]); # verts
 				if ($ni >= 0) { $print->(OUTFILE, $nx[$ni], $ny[$ni], $nz[$ni]); } # normals
 				if ($ti >= 0) { $print->(OUTFILE, $tx[$ti], $ty[$ti]); } # tex coords
-				if ($matopt)  { $print->(OUTFILE, $Kd->[0], $Kd->[1], $Kd->[2], $Ks->[0], $Ns); } # mat attribs
+				if ($matopt)  { # mat attribs
+					my $mat = $materials[$tokens[$n-1]];
+					my $Kd  = $mat->{"Kd"};
+					my $Ks  = $mat->{"Ks"};
+					my $Ns  = $mat->{"Ns"};
+					my $K   = $materials[0]->{"Kd"};
+					#print "Kd: ".$K->[0].", ".$K->[1].", ".$K->[2]."\n";
+					$print->(OUTFILE, $Kd->[0], $Kd->[1], $Kd->[2], $Ks->[0], $Ns);
+				}
 			}
 		}
 		else
@@ -977,4 +990,3 @@ sub writeOutput {
 	
 	close OUTFILE;
 }
-
