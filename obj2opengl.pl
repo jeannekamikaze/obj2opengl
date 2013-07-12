@@ -249,34 +249,34 @@ sub calcSizeAndCenter() {
             $ysum += $tokens[2];
             $zsum += $tokens[3];
 
-            if ( $numVerts == 1 ) {
+            if ($numVerts == 1) {
                 $xmin = $tokens[1];
                 $xmax = $tokens[1];
                 $ymin = $tokens[2];
                 $ymax = $tokens[2];
                 $zmin = $tokens[3];
                 $zmax = $tokens[3];
-	    }
-	    else {
-                if ($tokens[1] < $xmin) {
-                    $xmin = $tokens[1];
-                }
-                elsif ($tokens[1] > $xmax) {
-                  $xmax = $tokens[1];
-                }
-                if ($tokens[2] < $ymin) {
-                    $ymin = $tokens[2];
-                }
-                elsif ($tokens[2] > $ymax) {
-                    $ymax = $tokens[2];
-                }
-                if ($tokens[3] < $zmin) {
-                    $zmin = $tokens[3];
-                }
-                elsif ($tokens[3] > $zmax) {
-                    $zmax = $tokens[3];
-                }
-	    }
+			}
+			else {
+		        if ($tokens[1] < $xmin) {
+		            $xmin = $tokens[1];
+		        }
+		        elsif ($tokens[1] > $xmax) {
+		          $xmax = $tokens[1];
+		        }
+		        if ($tokens[2] < $ymin) {
+		            $ymin = $tokens[2];
+		       }
+		        elsif ($tokens[2] > $ymax) {
+		            $ymax = $tokens[2];
+		        }
+		        if ($tokens[3] < $zmin) {
+		            $zmin = $tokens[3];
+		        }
+		        elsif ($tokens[3] > $zmax) {
+		             $zmax = $tokens[3];
+		         }
+			}
         }
     }
     close INFILE;
@@ -367,21 +367,21 @@ sub loadData {
 
         # vertices
         if ($line =~ /v\s+.*/) {
-	    @tokens= split(' ', $line);
-	    $x = ( $tokens[1] - $xcen ) * $scalefac;
-	    $y = ( $tokens[2] - $ycen ) * $scalefac;
-	    $z = ( $tokens[3] - $zcen ) * $scalefac;
-	    $xcoords[$numVerts] = $x;
-	    $ycoords[$numVerts] = $y;
-	    $zcoords[$numVerts] = $z;
+	        @tokens= split(' ', $line);
+	        $x = ( $tokens[1] - $xcen ) * $scalefac;
+	        $y = ( $tokens[2] - $ycen ) * $scalefac;
+	        $z = ( $tokens[3] - $zcen ) * $scalefac;
+	        $xcoords[$numVerts] = $x;
+	        $ycoords[$numVerts] = $y;
+	        $zcoords[$numVerts] = $z;
 
-	    $numVerts++;
+	        $numVerts++;
 
-	    $aabb->{"min"}->[0] = min($aabb->{"min"}->[0], $x);
-	    $aabb->{"min"}->[1] = min($aabb->{"min"}->[1], $y);
-	    $aabb->{"min"}->[2] = min($aabb->{"min"}->[2], $z);
-            $aabb->{"max"}->[0] = max($aabb->{"max"}->[2], $z);
-            $aabb->{"max"}->[1] = max($aabb->{"max"}->[2], $z);
+	        $aabb->{"min"}->[0] = min($aabb->{"min"}->[0], $x);
+	        $aabb->{"min"}->[1] = min($aabb->{"min"}->[1], $y);
+	        $aabb->{"min"}->[2] = min($aabb->{"min"}->[2], $z);
+            $aabb->{"max"}->[0] = max($aabb->{"max"}->[0], $x);
+            $aabb->{"max"}->[1] = max($aabb->{"max"}->[1], $y);
             $aabb->{"max"}->[2] = max($aabb->{"max"}->[2], $z);
         }
 
@@ -458,18 +458,18 @@ sub loadData {
                 my $vert2  = "$b[0]/$b[1]/$b[2]/$matIdx";
                 my $vert3  = "$c[0]/$c[1]/$c[2]/$matIdx";
                 my $vert4  = "";
-                if ($5 ne "") { $vert4 = "$d[0]/$d[1]/$d[2]/$matIdx"; }
+                if ($5 != "") { $vert4 = "$d[0]/$d[1]/$d[2]/$matIdx"; }
                 if (not exists $vertexToIdx{$vert1}) { $vertexToIdx{$vert1} = $n++; }
                 if (not exists $vertexToIdx{$vert2}) { $vertexToIdx{$vert2} = $n++; }
                 if (not exists $vertexToIdx{$vert3}) { $vertexToIdx{$vert3} = $n++; }
-                if ($5 ne "" and not exists $vertexToIdx{$vert4}) { $vertexToIdx{$vert4} = $n++; }
+                if ($5 != "" and not exists $vertexToIdx{$vert4}) { $vertexToIdx{$vert4} = $n++; }
 
                 # Push indices
                 my $n = scalar @indices;
                 $indices[$n++] = $vertexToIdx{$vert1};
                 $indices[$n++] = $vertexToIdx{$vert2};
                 $indices[$n++] = $vertexToIdx{$vert3};
-                if ($5 ne "")
+                if ($5 != "")
                 {
                     $indices[$n++] = $vertexToIdx{$vert1};
                     $indices[$n++] = $vertexToIdx{$vert3};
@@ -564,20 +564,20 @@ sub loadMTL {
             $i++;
             $materials[$i] = {"name" => $mat};
         }
-        elsif ($line =~ /Ns/) {
+        elsif ($line =~ /^\s*Ns/) {
             @tokens = split (' ', $line);
             my $Ns = $tokens[1];
             $materials[$i]->{"Ns"} = $Ns;
         }
-        elsif ($line =~ /Ka/) {
+        elsif ($line =~ /^\s*Ka/) {
             @tokens = split (' ', $line);
             $materials[$i]->{"Ka"} = [$tokens[1], $tokens[2], $tokens[3]];
         }
-        elsif ($line =~ /Kd/) {
+        elsif ($line =~ /^\s*Kd/) {
             @tokens = split (' ', $line);
             $materials[$i]->{"Kd"} = [$tokens[1], $tokens[2], $tokens[3]];
         }
-        elsif ($line =~ /Ks/) {
+        elsif ($line =~ /^\s*Ks/) {
             @tokens = split (' ', $line);
             $materials[$i]->{"Ks"} = [$tokens[1], $tokens[2], $tokens[3]];
         }
@@ -611,7 +611,6 @@ sub writeOutput {
     if ($writeMaterials) { print OUTFILE " materials"; }
     if ($writeObjects)   { print OUTFILE " objects"; }
     if ($matopt)         { print OUTFILE " matopt"; }
-    if (!$unit)          { print OUTFILE " aabb"; }
     print OUTFILE "\n";
     if ($indexed) {
         print OUTFILE "$indexMapSize\n";
@@ -621,10 +620,10 @@ sub writeOutput {
         my $numVerts = 3*$numFaces;
         print OUTFILE "$numVerts\n"; # needed constant for glDrawArrays
     }
-    if (!$unit) {
-        print OUTFILE "aabb ".$aabb->{"min"}->[0]." ".$aabb->{"min"}->[1]." ".$aabb->{"min"}->[2]." "
-            .$aabb->{"max"}->[0]." ".$aabb->{"max"}->[1]." ".$aabb->{"max"}->[2]."\n";
-    }
+    
+    # Write bounding box
+    print OUTFILE "aabb ".$aabb->{"min"}->[0]." ".$aabb->{"min"}->[1]." ".$aabb->{"min"}->[2]." "
+                  .$aabb->{"max"}->[0]." ".$aabb->{"max"}->[1]." ".$aabb->{"max"}->[2]."\n";
 
     # materials
     if ($writeMaterials) {
