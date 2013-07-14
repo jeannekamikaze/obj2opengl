@@ -1,51 +1,49 @@
 #! /usr/bin/perl
 =head1 NAME
-
-    obj2opengl - converts obj files to arrays for glDrawArrays
-
+    
+    obj2opengl - converts obj files to a VBO-friendly format
+    
     =head1 SYNOPSIS
-
+    
     obj2opengl [options] file
-
+    
     use -help or -man for further information
-
+    
     =head1 DESCRIPTION
-
-    This script expects and OBJ file consisting of vertices,
-    texture coords and normals. Each face must contain
-    exactly 3 vertices. The texture coords are two dimonsional.
-
-    The resulting .H file offers three float arrays to be rendered
-    with glDrawArrays.
-
+    
+    This script transforms a given OBJ file into a format suitable
+    for OpenGL rendering. The output file format is easier to load
+    than the OBJ format and can be encoded in binary to allow for
+    faster load times.
+    
     =head1 AUTHOR
-
+    
     Marc Sunet (http://www.shellblade.net)
-
+    
     Original work: Heiko Behrens (http://www.HeikoBehrens.net)
-
+    
     =head1 VERSION
-
-    14th August 2012
-
+    
+    14th July 2013
+    
     =head1 COPYRIGHT
-
+    
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
     the Free Software Foundation, either version 3 of the License, or
     (at your option) any later version.
-
+    
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
-
+    
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 =head1 ACKNOWLEDGEMENTS
 
-This script is based on the work of Margaret Geroch.
+This script is based on the work of Margaret Geroch and Heiko Behrens.
 
 =head1 REQUIRED ARGUMENTS
 
@@ -74,10 +72,13 @@ longest dimension is 1 unit.
 Sets the scale factor explicitly. Please be aware that negative numbers
 are not handled correctly regarding the orientation of the normals.
 
-=item B<-noMove>
+=item B<-recenter>
 
-Prevents automatic scaling. Otherwise the object will be moved to the center of
-its vertices.
+Set the origin to the object's center.
+
+=item B<-center <float> <float> <float>>
+
+Set the object's center to the given point.
 
 =item B<-o>, B<-outputFilename>
 
@@ -147,7 +148,6 @@ writeOutput();
 sub handleArguments() {
     my $help = 0;
     my $man = 0;
-    my $nomove = 0;
     $unit = 0;
     $outputBinary = 0;
     $indexed = 0;
@@ -159,8 +159,8 @@ sub handleArguments() {
         "man"  => \$man,
         "unit" => \$unit,
         "scale=f" => \$scalefac,
-        "noMove" => \$nomove,
         "center=f{3}" => \@center,
+        "recenter" => \$recenter,
         "outputFilename=s" => \$outFilename,
         "nameOfObject=s" => \$object,
         "verbose!" => \$verbose,
@@ -169,29 +169,27 @@ sub handleArguments() {
         "interleaved" => \$interleaved,
         "matopt" => \$matopt
         );
-
+    
     if(!$unit) {
         $scalefac = 1;
-        $aabb = { "min" => [], "max" => [] };
     }
-
-    if($nomove) {
-        @center = (0, 0, 0);
-    }
-
+    
     if(defined(@center)) {
         $xcen = $center[0];
         $ycen = $center[1];
         $zcen = $center[2];
     }
-
+    elsif (!$recenter) {
+    	($xcen,$ycen,$zcen) = (0,0,0);
+    }
+    
     if($#ARGV == 0) {
         my ($file, $dir, $ext) = fileparse($ARGV[0], qr/\.[^.]*/);
         $inFilename = $dir . $file . $ext;
     } else {
         $errorInOptions = true;
     }
-
+    
     # (optional) derive output filename from input filename
     unless($errorInOptions || defined($outFilename)) {
         my ($file, $dir, $ext) = fileparse($inFilename, qr/\.[^.]*/);
@@ -203,23 +201,23 @@ sub handleArguments() {
             $outFilename = $outFilename . ".txt";
         }
     }
-
+    
     # (optional) define object name from output filename
     unless($errorInOptions || defined($object)) {
         my ($file, $dir, $ext) = fileparse($outFilename, qr/\.[^.]*/);
         $object = $file;
     }
-
+    
     ($inFilename ne $outFilename) or
         die ("Input filename must not be the same as output filename")
         unless($errorInOptions);
-
+    
     if($errorInOptions || $man || $help) {
         pod2usage(-verbose => 2) if $man;
         pod2usage(-verbose => 1) if $help;
         pod2usage();
     }
-
+    
     # check wheter file exists
     open ( INFILE, "<$inFilename" )
         || die "Can't find file '$inFilename' ...exiting \n";
@@ -232,23 +230,23 @@ sub handleArguments() {
 sub calcSizeAndCenter() {
     open ( INFILE, "<$inFilename" )
         || die "Can't find file $inFilename...exiting \n";
-
+    
     $numVerts = 0;
-
+    
     my ($xsum, $ysum, $zsum
        ,$xmin, $ymin, $zmin
        ,$xmax, $ymax, $zmax);
-
+    
     while ( $line = <INFILE> ) {
         chop $line;
         if ($line =~ /v\s+.*/) {
             $numVerts++;
             @tokens = split(' ', $line);
-
+            
             $xsum += $tokens[1];
             $ysum += $tokens[2];
             $zsum += $tokens[3];
-
+            
             if ($numVerts == 1) {
                 $xmin = $tokens[1];
                 $xmax = $tokens[1];
@@ -280,14 +278,14 @@ sub calcSizeAndCenter() {
         }
     }
     close INFILE;
-
+    
     #  Calculate the center
     unless(defined($xcen)) {
         $xcen = $xsum / $numVerts;
         $ycen = $ysum / $numVerts;
         $zcen = $zsum / $numVerts;
     }
-
+    
     #  Calculate the scale factor
     unless(defined($scalefac)) {
         my $xdiff = ($xmax - $xmin);
@@ -349,6 +347,7 @@ sub printStatistics() {
 #   na_idx[], nb_idx[], nc_idx[] for normals
 #   store indizes for the former arrays respectively
 #   also, $face_line[] store actual face string
+# aabb left in $aabb
 sub loadData {
     $numVerts = 0;
     $numFaces = 0;
@@ -358,10 +357,10 @@ sub loadData {
     $indexMapSize = 0;
     @indices = ();
     %vertexToIdx = ();
-
+    
     open ( INFILE, "<$inFilename" )
         || die "Can't find file $inFilename...exiting \n";
-
+    
     while ($line = <INFILE>) {
         chop $line;
 
@@ -374,17 +373,23 @@ sub loadData {
 	        $xcoords[$numVerts] = $x;
 	        $ycoords[$numVerts] = $y;
 	        $zcoords[$numVerts] = $z;
-
+            
 	        $numVerts++;
-
-	        $aabb->{"min"}->[0] = min($aabb->{"min"}->[0], $x);
-	        $aabb->{"min"}->[1] = min($aabb->{"min"}->[1], $y);
-	        $aabb->{"min"}->[2] = min($aabb->{"min"}->[2], $z);
-            $aabb->{"max"}->[0] = max($aabb->{"max"}->[0], $x);
-            $aabb->{"max"}->[1] = max($aabb->{"max"}->[1], $y);
-            $aabb->{"max"}->[2] = max($aabb->{"max"}->[2], $z);
+	        
+	        if (defined($aabb)) {
+	            $aabb->{min}->[0] = min($aabb->{min}->[0], $x);
+	            $aabb->{min}->[1] = min($aabb->{min}->[1], $y);
+	            $aabb->{min}->[2] = min($aabb->{min}->[2], $z);
+                $aabb->{max}->[0] = max($aabb->{max}->[0], $x);
+                $aabb->{max}->[1] = max($aabb->{max}->[1], $y);
+                $aabb->{max}->[2] = max($aabb->{max}->[2], $z);
+            }
+            else {
+                $aabb->{min} = [$x, $y, $z];
+                $aabb->{max} = [$x, $y, $z];
+            }
         }
-
+        
         # texture coords
         elsif ($line =~ /vt\s+.*/) {
 	    @tokens= split(' ', $line);
@@ -392,10 +397,10 @@ sub loadData {
 	    $y = 1 - $tokens[2];
 	    $tx[$numTexture] = $x;
 	    $ty[$numTexture] = $y;
-
+        
 	    $numTexture++;
         }
-
+        
         #normals
         elsif ($line =~ /vn\s+.*/) {
 	    @tokens= split(' ', $line);
@@ -405,10 +410,10 @@ sub loadData {
 	    $nx[$numNormals] = $x;
 	    $ny[$numNormals] = $y;
 	    $nz[$numNormals] = $z;
-
+        
 	    $numNormals++;
         }
-
+        
         # faces
         elsif ($line =~ /f\s+([^ ]+)\s+([^ ]+)\s+([^ ]+)(\s+([^ ]+))?/) {
             @a = split('/', $1);
@@ -417,39 +422,39 @@ sub loadData {
             $va_idx[$numFaces] = $a[0]-1;
             $ta_idx[$numFaces] = $a[1]-1;
             $na_idx[$numFaces] = $a[2]-1;
-
+            
             $vb_idx[$numFaces] = $b[0]-1;
             $tb_idx[$numFaces] = $b[1]-1;
             $nb_idx[$numFaces] = $b[2]-1;
-
+            
             $vc_idx[$numFaces] = $c[0]-1;
             $tc_idx[$numFaces] = $c[1]-1;
             $nc_idx[$numFaces] = $c[2]-1;
-
+            
             $face_line[$numFaces] = $line;
-
+            
             $numFaces++;
-
+            
             # ractangle => second triangle
             if($5 != "") {
                 @d = split('/', $5);
                 $va_idx[$numFaces] = $a[0]-1;
                 $ta_idx[$numFaces] = $a[1]-1;
                 $na_idx[$numFaces] = $a[2]-1;
-
+                
                 $vb_idx[$numFaces] = $c[0]-1;
                 $tb_idx[$numFaces] = $c[1]-1;
                 $nb_idx[$numFaces] = $c[2]-1;
-
+                
                 $vc_idx[$numFaces] = $d[0]-1;
                 $tc_idx[$numFaces] = $d[1]-1;
                 $nc_idx[$numFaces] = $d[2]-1;
-
+                
                 $face_line[$numFaces] = $line;
-
+                
                 $numFaces++;
             }
-
+            
             if ($indexed) {
                 # Update vertex -> index map
                 my $n = scalar keys %vertexToIdx;
@@ -463,7 +468,7 @@ sub loadData {
                 if (not exists $vertexToIdx{$vert2}) { $vertexToIdx{$vert2} = $n++; }
                 if (not exists $vertexToIdx{$vert3}) { $vertexToIdx{$vert3} = $n++; }
                 if ($5 != "" and not exists $vertexToIdx{$vert4}) { $vertexToIdx{$vert4} = $n++; }
-
+                
                 # Push indices
                 my $n = scalar @indices;
                 $indices[$n++] = $vertexToIdx{$vert1};
@@ -477,7 +482,7 @@ sub loadData {
                 }
             }
         }
-
+        
         # groups
         elsif ($line =~ /usemtl\s*/) {
             @tokens = split(' ', $line);
@@ -491,7 +496,7 @@ sub loadData {
             }
             $numObjects++;
         }
-
+        
         # material file
         elsif ($line =~ /mtllib/) {
             @tokens = split (' ', $line);
@@ -508,11 +513,11 @@ sub loadData {
             #}
         }
     }
-
+    
     close INFILE;
-
+    
     $indexMapSize = scalar keys %vertexToIdx;
-
+    
     #print "Vertex -> Index:\n";
     #while (($key,$val) = each(%vertexToIdx)) { print "$key -> $val\n"; }
     #print "Indices:\n@indices\n";
@@ -549,42 +554,42 @@ sub loadMTL {
     my $i = -1;
     my $mtl = $_[0];
     $materials = ();
-
+    
     print "Materials      : $mtl\n";
-
+    
     open (MTL, "<$mtl")
         || die "Can't open file $mtl ... exiting\n";
-
+    
     while (my $line = <MTL>) {
         chop $line;
-
+        
         if ($line =~ /newmtl/) {
             @tokens = split (' ', $line);
             $mat = $tokens[1];
             $i++;
-            $materials[$i] = {"name" => $mat};
+            $materials[$i] = {name => $mat};
         }
         elsif ($line =~ /^\s*Ns/) {
             @tokens = split (' ', $line);
             my $Ns = $tokens[1];
-            $materials[$i]->{"Ns"} = $Ns;
+            $materials[$i]->{Ns} = $Ns;
         }
         elsif ($line =~ /^\s*Ka/) {
             @tokens = split (' ', $line);
-            $materials[$i]->{"Ka"} = [$tokens[1], $tokens[2], $tokens[3]];
+            $materials[$i]->{Ka} = [$tokens[1], $tokens[2], $tokens[3]];
         }
         elsif ($line =~ /^\s*Kd/) {
             @tokens = split (' ', $line);
-            $materials[$i]->{"Kd"} = [$tokens[1], $tokens[2], $tokens[3]];
+            $materials[$i]->{Kd} = [$tokens[1], $tokens[2], $tokens[3]];
         }
         elsif ($line =~ /^\s*Ks/) {
             @tokens = split (' ', $line);
-            $materials[$i]->{"Ks"} = [$tokens[1], $tokens[2], $tokens[3]];
+            $materials[$i]->{Ks} = [$tokens[1], $tokens[2], $tokens[3]];
         }
     }
-
+    
     close MTL;
-
+    
     # Build mat index from name
     for (my $j = 0; $j < scalar @materials; $j++) {
         my $name = $materials[$j]{"name"};
@@ -597,10 +602,10 @@ sub writeOutput {
     $matopt = $matopt && $numMaterials && $numObjects;
     my $writeMaterials = $numMaterials && !$matopt;
     my $writeObjects = $numObjects && !$matopt;
-
+    
     open ( OUTFILE, ">:raw", $outFilename )
         || die "Can't create file $outFilename ... exiting\n";
-
+    
     # write header
     print OUTFILE "verts";
     if ($numNormals)     { print OUTFILE " normals"; }
@@ -622,25 +627,25 @@ sub writeOutput {
     }
     
     # Write bounding box
-    print OUTFILE "aabb ".$aabb->{"min"}->[0]." ".$aabb->{"min"}->[1]." ".$aabb->{"min"}->[2]." "
-                  .$aabb->{"max"}->[0]." ".$aabb->{"max"}->[1]." ".$aabb->{"max"}->[2]."\n";
-
+    print OUTFILE "aabb $aabb->{min}->[0] $aabb->{min}->[1] $aabb->{min}->[2] ".
+                       "$aabb->{max}->[0] $aabb->{max}->[1] $aabb->{max}->[2]\n";
+    
     # materials
     if ($writeMaterials) {
         print OUTFILE "mats $numMaterials\n";
         for ($j = 0; $j < @materials; $j++) {
-            my $name = $materials[$j]->{"name"};
-            my $Ns   = $materials[$j]->{"Ns"};
-            my $Ka   = $materials[$j]->{"Ka"};
-            my $Kd   = $materials[$j]->{"Kd"};
-            my $Ks   = $materials[$j]->{"Ks"};
+            my $name = $materials[$j]->{name};
+            my $Ns   = $materials[$j]->{Ns};
+            my $Ka   = $materials[$j]->{Ka};
+            my $Kd   = $materials[$j]->{Kd};
+            my $Ks   = $materials[$j]->{Ks};
             print OUTFILE "mat $name $Ns "
                 ."$Ka->[0] $Ka->[1] $Ka->[2] "
                 ."$Kd->[0] $Kd->[1] $Kd->[2] "
                 ."$Ks->[0] $Ks->[1] $Ks->[2]\n";
         }
     }
-
+    
     # compute object instances
     # objects are first sorted by material
     # vertex arrays or indices arrays are then reordered according to new object order
@@ -671,10 +676,10 @@ sub writeOutput {
             }
             @objects[$j] = [$j, $matIndex, $start, $length];
         }
-
+        
         # sort objects by material and group up
         @objects = sort { $a->[1] cmp $b->[1] } @objects;
-
+        
         # re-order vertex arrays or indices
         if ($indexed) {
             my @indices_new = [];
@@ -725,7 +730,7 @@ sub writeOutput {
             @tx = @tx_new;
             @ty = @ty_new;
         }
-
+        
         # recompute offsets
         my $n = scalar @objects;
         my $off = 0;
@@ -733,7 +738,7 @@ sub writeOutput {
             $objects[$j][2] = $off;
             $off += $objects[$j][3];
         }
-
+        
         # compress objects sharing the same material
         @objects_new = ();
         my $n = scalar @objects;
@@ -762,7 +767,7 @@ sub writeOutput {
         @objects = @objects_new;
         $numObjects = scalar @objects;
     }
-
+    
     # object instances
     if ($writeObjects) {
         print OUTFILE "objs $numObjects\n";
@@ -770,7 +775,7 @@ sub writeOutput {
             print OUTFILE "obj $objects[$j][1] $objects[$j][2] $objects[$j][3]\n";
         }
     }
-
+    
     # construct index to vertex map
     my @idxToVertex = ();
     if ($indexed) {
@@ -788,7 +793,7 @@ sub writeOutput {
         #print "Vertex -> Index:\n";
         #for (my $j = 0; $j < $n; $j++) { print "$j -> ".$idxToVertex{$j}."\n"; }
     }
-
+    
     my $print = sub {
         my ($file, @data) = @_;
         if ($outputBinary) {
@@ -797,7 +802,7 @@ sub writeOutput {
         }
         else { print $file join(" ", @data)."\n"; }
     };
-
+    
     if ($interleaved) {
         if ($indexed) {
             for (my $j = 0; $j < $indexMapSize; $j++) {
@@ -819,10 +824,10 @@ sub writeOutput {
                 if ($ti >= 0) { $print->(OUTFILE, $tx[$ti], $ty[$ti]); } # tex coords
                 if ($matopt)  { # mat attribs
                     my $mat = $materials[$tokens[$n-1]];
-                    my $Kd  = $mat->{"Kd"};
-                    my $Ks  = $mat->{"Ks"};
-                    my $Ns  = $mat->{"Ns"};
-                    my $K   = $materials[0]->{"Kd"};
+                    my $Kd  = $mat->{Kd};
+                    my $Ks  = $mat->{Ks};
+                    my $Ns  = $mat->{Ns};
+                    my $K   = $materials[0]->{Kd};
                     #print "Kd: ".$K->[0].", ".$K->[1].", ".$K->[2]."\n";
                     $print->(OUTFILE, $Kd->[0], $Kd->[1], $Kd->[2], $Ks->[0], $Ns);
                 }
@@ -895,7 +900,7 @@ sub writeOutput {
             }
         }
     }
-
+    
     # write indices
     if ($indexed) {
         for my $idx (@indices) {
@@ -903,6 +908,6 @@ sub writeOutput {
             else { print OUTFILE "$idx\n"; }
         }
     }
-
+    
     close OUTFILE;
 }
