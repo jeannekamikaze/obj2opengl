@@ -72,13 +72,13 @@ longest dimension is 1 unit.
 Sets the scale factor explicitly. Please be aware that negative numbers
 are not handled correctly regarding the orientation of the normals.
 
-=item B<-recenter>
+=item B<-center>
 
 Set the origin to the object's center.
 
-=item B<-center <float> <float> <float>>
+=item B<-origin <float> <float> <float>>
 
-Set the object's center to the given point.
+Set the origin to the given point.
 
 =item B<-o>, B<-outputFilename>
 
@@ -123,7 +123,7 @@ use Pod::Usage;
 handleArguments();
 
 # derive center coords and scale factor if neither provided nor disabled
-unless(defined($scalefac) && defined($xcen)) {
+unless(defined($scalefac) && defined($xorigin)) {
 	calcSizeAndCenter();
 }
 
@@ -159,8 +159,8 @@ sub handleArguments() {
         "man"  => \$man,
         "unit" => \$unit,
         "scale=f" => \$scalefac,
-        "center=f{3}" => \@center,
-        "recenter" => \$recenter,
+        "origin=f{3}" => \@origin,
+        "center" => \$center,
         "outputFilename=s" => \$outFilename,
         "nameOfObject=s" => \$object,
         "verbose!" => \$verbose,
@@ -174,19 +174,20 @@ sub handleArguments() {
         $scalefac = 1;
     }
     
-    if(defined(@center)) {
-        $xcen = $center[0];
-        $ycen = $center[1];
-        $zcen = $center[2];
+    if(defined(@origin)) {
+        $xorigin = $origin[0];
+        $yorigin = $origin[1];
+        $zorigin = $origin[2];
     }
-    elsif (!$recenter) {
-    	($xcen,$ycen,$zcen) = (0,0,0);
+    elsif (!$center) {
+    	($xorigin,$yorigin,$zorigin) = (0,0,0);
     }
     
     if($#ARGV == 0) {
         my ($file, $dir, $ext) = fileparse($ARGV[0], qr/\.[^.]*/);
         $inFilename = $dir . $file . $ext;
-    } else {
+    }
+    else {
         $errorInOptions = true;
     }
     
@@ -224,7 +225,7 @@ sub handleArguments() {
     close(INFILE);
 }
 
-# Stores center of object in $xcen, $ycen, $zcen
+# Stores origina in $xorigin, $yorigin, $zorigin
 # and calculates scaling factor $scalefac to limit max
 #   side of object to 1.0 units
 sub calcSizeAndCenter() {
@@ -233,9 +234,9 @@ sub calcSizeAndCenter() {
     
     $numVerts = 0;
     
-    my ($xsum, $ysum, $zsum
-       ,$xmin, $ymin, $zmin
-       ,$xmax, $ymax, $zmax);
+    my $xsum, $ysum, $zsum,
+       $xmin, $ymin, $zmin,
+       $xmax, $ymax, $zmax;
     
     while ( $line = <INFILE> ) {
         chop $line;
@@ -264,7 +265,7 @@ sub calcSizeAndCenter() {
 		        }
 		        if ($tokens[2] < $ymin) {
 		            $ymin = $tokens[2];
-		       }
+		        }
 		        elsif ($tokens[2] > $ymax) {
 		            $ymax = $tokens[2];
 		        }
@@ -273,17 +274,17 @@ sub calcSizeAndCenter() {
 		        }
 		        elsif ($tokens[3] > $zmax) {
 		             $zmax = $tokens[3];
-		         }
+		        }
 			}
         }
     }
     close INFILE;
     
     #  Calculate the center
-    unless(defined($xcen)) {
-        $xcen = $xsum / $numVerts;
-        $ycen = $ysum / $numVerts;
-        $zcen = $zsum / $numVerts;
+    unless(defined($xorigin)) {
+        $xorigin = $xsum / $numVerts;
+        $yorigin = $ysum / $numVerts;
+        $zorigin = $zsum / $numVerts;
     }
     
     #  Calculate the scale factor
@@ -309,7 +310,7 @@ sub printInputAndOptions() {
     print "Input file     : $inFilename\n";
     print "Output file    : $outFilename\n";
     print "Object name    : $object\n";
-    print "Center         : <$xcen, $ycen, $zcen>\n";
+    print "Origin         : <$xorigin, $yorigin, $zorigin>\n";
     print "Scale by       : $scalefac\n";
 }
 
@@ -336,7 +337,7 @@ sub printStatistics() {
 
 # reads vertices into $xcoords[], $ycoords[], $zcoords[]
 #   where coordinates are moved and scaled according to
-#   $xcen, $ycen, $zcen and $scalefac
+#   $xorigin, $yorigin, $zorigin and $scalefac
 # reads texture coords into $tx[], $ty[]
 #   where y coordinate is mirrowed
 # reads normals into $nx[], $ny[], $nz[]
@@ -367,9 +368,9 @@ sub loadData {
         # vertices
         if ($line =~ /v\s+.*/) {
 	        @tokens= split(' ', $line);
-	        $x = ( $tokens[1] - $xcen ) * $scalefac;
-	        $y = ( $tokens[2] - $ycen ) * $scalefac;
-	        $z = ( $tokens[3] - $zcen ) * $scalefac;
+	        $x = ( $tokens[1] - $xorigin ) * $scalefac;
+	        $y = ( $tokens[2] - $yorigin ) * $scalefac;
+	        $z = ( $tokens[3] - $zorigin ) * $scalefac;
 	        $xcoords[$numVerts] = $x;
 	        $ycoords[$numVerts] = $y;
 	        $zcoords[$numVerts] = $z;
@@ -392,26 +393,26 @@ sub loadData {
         
         # texture coords
         elsif ($line =~ /vt\s+.*/) {
-	    @tokens= split(' ', $line);
-	    $x = $tokens[1];
-	    $y = 1 - $tokens[2];
-	    $tx[$numTexture] = $x;
-	    $ty[$numTexture] = $y;
+	        @tokens= split(' ', $line);
+	        $x = $tokens[1];
+	        $y = 1 - $tokens[2];
+	        $tx[$numTexture] = $x;
+	        $ty[$numTexture] = $y;
         
-	    $numTexture++;
+	        $numTexture++;
         }
         
         #normals
         elsif ($line =~ /vn\s+.*/) {
-	    @tokens= split(' ', $line);
-	    $x = $tokens[1];
-	    $y = $tokens[2];
-	    $z = $tokens[3];
-	    $nx[$numNormals] = $x;
-	    $ny[$numNormals] = $y;
-	    $nz[$numNormals] = $z;
+	        @tokens= split(' ', $line);
+	        $x = $tokens[1];
+	        $y = $tokens[2];
+	        $z = $tokens[3];
+	        $nx[$numNormals] = $x;
+	        $ny[$numNormals] = $y;
+	        $nz[$numNormals] = $z;
         
-	    $numNormals++;
+	        $numNormals++;
         }
         
         # faces
