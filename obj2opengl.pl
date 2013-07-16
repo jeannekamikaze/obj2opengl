@@ -170,7 +170,7 @@ sub handleArguments() {
         "matopt" => \$matopt
         );
     
-    if(!$unit) {
+    if(!$unit && !defined($scalefac)) {
         $scalefac = 1;
     }
     
