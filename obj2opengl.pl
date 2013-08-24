@@ -80,6 +80,17 @@ Set the origin to the object's center.
 
 Set the origin to the given point.
 
+=item B<-texcoords <float> <float> <float> <float>>
+
+Map the model's texture coordinates to the given quad.
+Useful when using a texture atlas.
+
+=item B<-fliptexy>
+
+Flip the y-coordinate of all texture coordinates:
+
+y = 1 - y
+
 =item B<-o>, B<-outputFilename>
 
 Name of the output file name. If omitted, the output file the same as the
@@ -145,6 +156,9 @@ writeOutput();
 # Sub Routines
 # -----------------------------------------------------------------
 
+# @origin: the point with respect to which the model's verts are expressed.
+# @textureAtlasQuad: the coordinates of the quad inside an atlas to which
+#     the model's texture coordinates are mapped.
 sub handleArguments() {
     my $help = 0;
     my $man = 0;
@@ -154,6 +168,7 @@ sub handleArguments() {
     $interleaved = 0;
     $matopt = 0;
     $verbose = 1;
+    $flipTexY = 0;
     $errorInOptions = !GetOptions (
         "help" => \$help,
         "man"  => \$man,
@@ -161,6 +176,8 @@ sub handleArguments() {
         "scale=f" => \$scalefac,
         "origin=f{3}" => \@origin,
         "center" => \$center,
+        "texcoords=f{4}" => \@textureAtlasQuad,
+        "fliptexy" => \$flipTexY,
         "outputFilename=s" => \$outFilename,
         "nameOfObject=s" => \$object,
         "verbose!" => \$verbose,
@@ -225,9 +242,9 @@ sub handleArguments() {
     close(INFILE);
 }
 
-# Stores origina in $xorigin, $yorigin, $zorigin
+# Stores origin in $xorigin, $yorigin, $zorigin
 # and calculates scaling factor $scalefac to limit max
-#   side of object to 1.0 units
+# side of object to 1.0 units
 sub calcSizeAndCenter() {
     open ( INFILE, "<$inFilename" )
         || die "Can't find file $inFilename...exiting \n";
@@ -312,6 +329,12 @@ sub printInputAndOptions() {
     print "Object name    : $object\n";
     print "Origin         : <$xorigin, $yorigin, $zorigin>\n";
     print "Scale by       : $scalefac\n";
+    if (defined(@textureAtlasQuad)) {
+        print "Texture quad   : ($textureAtlasQuad[0], ".
+              "$textureAtlasQuad[1]), ($textureAtlasQuad[2], ".
+              "$textureAtlasQuad[3])\n";
+    }
+    else { print "Texture quad   : 0 0 1 1\n"; }
 }
 
 sub printStatistics() {
@@ -598,6 +621,15 @@ sub loadMTL {
     }
 }
 
+sub lerp {
+    return $_[1] + $_[0]*($_[2]-$_[1]);
+}
+
+sub wrap {
+	while ($_[0] > $_[1]) { $_[0] -= $_[1]; }
+	return $_[0];
+}
+
 sub writeOutput {
     my $numMaterials = @materials;
     $matopt = $matopt && $numMaterials && $numObjects;
@@ -794,6 +826,22 @@ sub writeOutput {
         #print "Vertex -> Index:\n";
         #for (my $j = 0; $j < $n; $j++) { print "$j -> ".$idxToVertex{$j}."\n"; }
     }
+    
+    # map the model's texture coordinates to the atlas quad if required.
+    if (defined(@textureAtlasQuad)) {
+    	print "Converting texture coordinates\n";
+        for (my $i = 0; $i < $numTexture; $i++) {
+            # wrap around [0,1] like in GL_REPEAT, then interpolate between atlas quad.
+            $tx[$i] = lerp(wrap($tx[$i], 1), $textureAtlasQuad[0], $textureAtlasQuad[2]);
+            $ty[$i] = lerp(wrap($ty[$i], 1), $textureAtlasQuad[1], $textureAtlasQuad[3]);
+            if ($flipTexY) { $ty[$i] = 1 - $ty[$i]; }
+        }
+    }
+    
+    #print "Texture coordinates:\n";
+    #for (my $i = 0; $i < $numTexture; $i++) {
+    #	printf "($tx[$i], $ty[$i])\n";
+    #}
     
     my $print = sub {
         my ($file, @data) = @_;
