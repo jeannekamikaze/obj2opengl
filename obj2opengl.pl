@@ -418,7 +418,7 @@ sub loadData {
         elsif ($line =~ /vt\s+.*/) {
 	        @tokens= split(' ', $line);
 	        $x = $tokens[1];
-	        $y = 1 - $tokens[2];
+	        $y = $tokens[2];
 	        $tx[$numTexture] = $x;
 	        $ty[$numTexture] = $y;
         
