@@ -834,8 +834,13 @@ sub writeOutput {
             # wrap around [0,1] like in GL_REPEAT, then interpolate between atlas quad.
             $tx[$i] = lerp(wrap($tx[$i], 1), $textureAtlasQuad[0], $textureAtlasQuad[2]);
             $ty[$i] = lerp(wrap($ty[$i], 1), $textureAtlasQuad[1], $textureAtlasQuad[3]);
-            if ($flipTexY) { $ty[$i] = 1 - $ty[$i]; }
         }
+    }
+    
+    if ($flipTexY) {
+    	for (my $i = 0; $i < $numTexture; $i++) {
+    		$ty[$i] = 1 - $ty[$i];
+    	}
     }
     
     #print "Texture coordinates:\n";
